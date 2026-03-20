@@ -8,15 +8,17 @@ import (
 	"time"
 )
 
+const nullValue = `\N`
+
 func escape(s string) string {
-	s = strings.Replace(s, `\`, `\\`, -1)
-	s = strings.Replace(s, `'`, `\'`, -1)
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `'`, `\'`)
 	return s
 }
 
 func unescape(s string) string {
-	s = strings.Replace(s, `\\`, `\`, -1)
-	s = strings.Replace(s, `\'`, `'`, -1)
+	s = strings.ReplaceAll(s, `\\`, `\`)
+	s = strings.ReplaceAll(s, `\'`, `'`)
 	return s
 }
 
@@ -33,6 +35,11 @@ func splitStringToItems(s string) []string {
 }
 
 func unmarshal(value interface{}, data string) (err error) {
+	// Handle Nullable types (\N means NULL)
+	if data == nullValue {
+		return nil
+	}
+
 	var m interface{}
 	switch v := value.(type) {
 	case *int:
@@ -49,19 +56,63 @@ func unmarshal(value interface{}, data string) (err error) {
 		*v = int32(m.(int64))
 	case *int64:
 		*v, err = strconv.ParseInt(data, 10, 64)
+	case *uint:
+		m, err = strconv.ParseUint(data, 10, 64)
+		*v = uint(m.(uint64))
+	case *uint8:
+		m, err = strconv.ParseUint(data, 10, 8)
+		*v = uint8(m.(uint64))
+	case *uint16:
+		m, err = strconv.ParseUint(data, 10, 16)
+		*v = uint16(m.(uint64))
+	case *uint32:
+		m, err = strconv.ParseUint(data, 10, 32)
+		*v = uint32(m.(uint64))
+	case *uint64:
+		*v, err = strconv.ParseUint(data, 10, 64)
 	case *float32:
 		m, err = strconv.ParseFloat(data, 32)
 		*v = float32(m.(float64))
 	case *float64:
 		m, err = strconv.ParseFloat(data, 64)
 		*v = m.(float64)
+	case *bool:
+		switch data {
+		case "1", "true", "True":
+			*v = true
+		case "0", "false", "False":
+			*v = false
+		default:
+			return fmt.Errorf("cannot unmarshal %q into bool", data)
+		}
 	case *string:
 		*v = unescape(data)
 	case *time.Time:
+		// Try DateTime first, then Date
 		*v, err = time.ParseInLocation("2006-01-02 15:04:05", data, time.UTC)
+		if err != nil {
+			*v, err = time.ParseInLocation("2006-01-02", data, time.UTC)
+		}
+	case **string:
+		// Nullable(String)
+		s := unescape(data)
+		*v = &s
+	case **int64:
+		// Nullable(Int64)
+		var n int64
+		n, err = strconv.ParseInt(data, 10, 64)
+		if err == nil {
+			*v = &n
+		}
+	case **float64:
+		// Nullable(Float64)
+		var f float64
+		f, err = strconv.ParseFloat(data, 64)
+		if err == nil {
+			*v = &f
+		}
 	case *[]int:
 		if !isArray(data) {
-			//noinspection GoPlaceholderCount
 			return fmt.Errorf("Column data is not of type []int")
 		}
 		if isEmptyArray(data) {
@@ -78,7 +129,6 @@ func unmarshal(value interface{}, data string) (err error) {
 		*v = res
 	case *[]string:
 		if !isArray(data) {
-			//noinspection GoPlaceholderCount
 			return fmt.Errorf("Column data is not of type []string")
 		}
 		if isEmptyArray(data) {
@@ -97,7 +147,6 @@ func unmarshal(value interface{}, data string) (err error) {
 		*v = res
 	case *Array:
 		if !isArray(data) {
-			//noinspection GoPlaceholderCount
 			return fmt.Errorf("Column data is not of type Array")
 		}
 		if isEmptyArray(data) {
@@ -169,15 +218,16 @@ func marshal(value interface{}) string {
 		uint, uint8, uint16, uint32, uint64,
 		float32, float64:
 		return fmt.Sprintf("%v", v)
-	//https://clickhouse.yandex/reference_en.html#Boolean values
 	case bool:
 		if value.(bool) {
 			return "1"
 		}
 		return "0"
-	//Convert time to Date type https://clickhouse.yandex/reference_en.html#Date
 	case time.Time:
-		return value.(time.Time).Format("2006-01-02")
+		if v.Hour() == 0 && v.Minute() == 0 && v.Second() == 0 && v.Nanosecond() == 0 {
+			return v.Format("2006-01-02")
+		}
+		return v.Format("2006-01-02 15:04:05")
 	}
 
 	return "''"

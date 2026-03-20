@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+var errorPattern = regexp.MustCompile(`(?s)Code:\s(\d+)[.,]?(.*)`)
+
 type DbError struct {
 	code int
 	msg  string
@@ -37,10 +39,6 @@ func errorFromResponse(resp string) error {
 	if resp == "" {
 		return nil
 	}
-	errorPattern, err := regexp.Compile(`Code:\s(\d+)[.,]?(.*)`)
-	if err != nil {
-		return err
-	}
 	if !errorPattern.MatchString(resp) {
 		return nil
 	}
@@ -50,9 +48,18 @@ func errorFromResponse(resp string) error {
 	if err != nil {
 		return err
 	}
-	msg := matches[2]
-	msg = strings.ReplaceAll(msg, "e.displayText() = ", "")
-	msg = strings.ReplaceAll(msg, ", e.what()", "")
+	var msg string
+	rest := matches[2]
+
+	// Extract message from e.displayText() if present
+	if idx := strings.Index(rest, "e.displayText() = "); idx >= 0 {
+		msg = rest[idx+len("e.displayText() = "):]
+		// Remove "e.what() = ..." suffix
+		if whatIdx := strings.Index(msg, ", e.what()"); whatIdx >= 0 {
+			msg = msg[:whatIdx]
+		}
+	}
+
 	msg = strings.TrimSpace(msg)
 	return &DbError{code, msg, resp}
 }

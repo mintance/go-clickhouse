@@ -115,6 +115,98 @@ func TestUnmarshal(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestUnmarshalUint(t *testing.T) {
+	var (
+		valUint   uint
+		valUint8  uint8
+		valUint16 uint16
+		valUint32 uint32
+		valUint64 uint64
+	)
+
+	err := unmarshal(&valUint, "42")
+	assert.NoError(t, err)
+	assert.Equal(t, uint(42), valUint)
+
+	err = unmarshal(&valUint8, "255")
+	assert.NoError(t, err)
+	assert.Equal(t, uint8(255), valUint8)
+
+	err = unmarshal(&valUint16, "65535")
+	assert.NoError(t, err)
+	assert.Equal(t, uint16(65535), valUint16)
+
+	err = unmarshal(&valUint32, "4294967295")
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(4294967295), valUint32)
+
+	err = unmarshal(&valUint64, "18446744073709551615")
+	assert.NoError(t, err)
+	assert.Equal(t, uint64(18446744073709551615), valUint64)
+}
+
+func TestUnmarshalBool(t *testing.T) {
+	var val bool
+
+	err := unmarshal(&val, "1")
+	assert.NoError(t, err)
+	assert.True(t, val)
+
+	err = unmarshal(&val, "0")
+	assert.NoError(t, err)
+	assert.False(t, val)
+
+	err = unmarshal(&val, "true")
+	assert.NoError(t, err)
+	assert.True(t, val)
+
+	err = unmarshal(&val, "false")
+	assert.NoError(t, err)
+	assert.False(t, val)
+
+	err = unmarshal(&val, "invalid")
+	assert.Error(t, err)
+}
+
+func TestUnmarshalNullable(t *testing.T) {
+	var valStr *string
+	err := unmarshal(&valStr, `\N`)
+	assert.NoError(t, err)
+	assert.Nil(t, valStr)
+
+	err = unmarshal(&valStr, "hello")
+	assert.NoError(t, err)
+	assert.NotNil(t, valStr)
+	assert.Equal(t, "hello", *valStr)
+
+	var valInt *int64
+	err = unmarshal(&valInt, `\N`)
+	assert.NoError(t, err)
+	assert.Nil(t, valInt)
+
+	err = unmarshal(&valInt, "42")
+	assert.NoError(t, err)
+	assert.NotNil(t, valInt)
+	assert.Equal(t, int64(42), *valInt)
+
+	var valFloat *float64
+	err = unmarshal(&valFloat, `\N`)
+	assert.NoError(t, err)
+	assert.Nil(t, valFloat)
+
+	err = unmarshal(&valFloat, "3.14")
+	assert.NoError(t, err)
+	assert.NotNil(t, valFloat)
+	assert.Equal(t, 3.14, *valFloat)
+}
+
+func TestUnmarshalDateOnly(t *testing.T) {
+	var val time.Time
+	err := unmarshal(&val, "2023-01-15")
+	assert.NoError(t, err)
+	assert.Equal(t, time.Date(2023, 1, 15, 0, 0, 0, 0, time.UTC), val)
+}
+
 func TestMarshal(t *testing.T) {
 	assert.Equal(t, "10", marshal(10))
 	assert.Equal(t, "10", marshal(int8(10)))
@@ -142,4 +234,17 @@ func TestMarshal(t *testing.T) {
 	assert.Equal(t, "IPv4NumToString(3221225985)", marshal(Func{"IPv4NumToString", 3221225985}))
 	assert.Equal(t, "''", marshal(t))
 	assert.Equal(t, "2017-04-10", marshal(time.Date(2017, 04, 10, 0, 0, 0, 0, time.UTC)))
+}
+
+func TestMarshalDateTime(t *testing.T) {
+	assert.Equal(t, "2023-01-15 10:30:45", marshal(time.Date(2023, 1, 15, 10, 30, 45, 0, time.UTC)))
+	assert.Equal(t, "2023-01-15", marshal(time.Date(2023, 1, 15, 0, 0, 0, 0, time.UTC)))
+}
+
+func TestMarshalUint(t *testing.T) {
+	assert.Equal(t, "42", marshal(uint(42)))
+	assert.Equal(t, "255", marshal(uint8(255)))
+	assert.Equal(t, "65535", marshal(uint16(65535)))
+	assert.Equal(t, "4294967295", marshal(uint32(4294967295)))
+	assert.Equal(t, "18446744073709551615", marshal(uint64(18446744073709551615)))
 }

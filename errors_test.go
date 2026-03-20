@@ -36,3 +36,19 @@ func TestErrorFromResponse(t *testing.T) {
 	assert.Equal(t, resp, err.Response())
 	assert.Equal(t, "DB::Exception: Syntax error: failed at end of query.\nExpected identifier,", err.Message())
 }
+
+func TestErrorFromResponse_CodeWithDot(t *testing.T) {
+	err := errorFromResponse("Code: 81. DB::Exception: Database test doesn't exist").(*DbError)
+	assert.Equal(t, 81, err.Code())
+}
+
+func TestErrorFromResponse_NoMatch(t *testing.T) {
+	assert.NoError(t, errorFromResponse("Some random response"))
+	assert.NoError(t, errorFromResponse("200 OK"))
+}
+
+func TestDbError_Implements(t *testing.T) {
+	var e error = &DbError{code: 1, msg: "test"}
+	assert.Error(t, e)
+	assert.Contains(t, e.Error(), "clickhouse error")
+}

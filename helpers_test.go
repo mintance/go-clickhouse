@@ -7,7 +7,7 @@ import (
 
 func TestNewHttpTransport(t *testing.T) {
 	tr := NewHttpTransport()
-	assert.IsType(t, HttpTransport{}, tr)
+	assert.IsType(t, &HttpTransport{}, tr)
 }
 
 func TestNewQuery(t *testing.T) {

@@ -1,6 +1,7 @@
 package clickhouse
 
 import (
+	"context"
 	"math/rand"
 	"sync"
 )
@@ -11,7 +12,7 @@ type Cluster struct {
 	conn   []*Conn
 	active []*Conn
 	fail   PingErrorFunc
-	mx     sync.Mutex
+	mx     sync.RWMutex
 }
 
 func NewCluster(conn ...*Conn) *Cluster {
@@ -21,8 +22,8 @@ func NewCluster(conn ...*Conn) *Cluster {
 }
 
 func (c *Cluster) IsDown() bool {
-	c.mx.Lock()
-	defer c.mx.Unlock()
+	c.mx.RLock()
+	defer c.mx.RUnlock()
 	return len(c.active) < 1
 }
 
@@ -31,8 +32,8 @@ func (c *Cluster) OnCheckError(f PingErrorFunc) {
 }
 
 func (c *Cluster) ActiveConn() *Conn {
-	c.mx.Lock()
-	defer c.mx.Unlock()
+	c.mx.RLock()
+	defer c.mx.RUnlock()
 	l := len(c.active)
 	if l < 1 {
 		return nil
@@ -41,13 +42,14 @@ func (c *Cluster) ActiveConn() *Conn {
 }
 
 func (c *Cluster) Check() {
-	var (
-		err error
-		res []*Conn
-	)
+	c.CheckCtx(context.Background())
+}
+
+func (c *Cluster) CheckCtx(ctx context.Context) {
+	var res []*Conn
 
 	for _, conn := range c.conn {
-		err = conn.Ping()
+		err := conn.Ping(ctx)
 		if err == nil {
 			res = append(res, conn)
 		} else {

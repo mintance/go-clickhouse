@@ -1,6 +1,7 @@
 package clickhouse
 
 import (
+	"context"
 	"errors"
 	"strings"
 )
@@ -18,6 +19,10 @@ type Func struct {
 
 type Query struct {
 	Stmt      string
+	QueryID   string
+	SessionID string
+	Settings  map[string]string
+
 	args      []interface{}
 	externals []External
 }
@@ -26,11 +31,18 @@ func (q *Query) AddExternal(name string, structure string, data []byte) {
 	q.externals = append(q.externals, External{Name: name, Structure: structure, Data: data})
 }
 
-func (q Query) Iter(conn *Conn) *Iter {
+func (q *Query) SetSetting(key, value string) {
+	if q.Settings == nil {
+		q.Settings = make(map[string]string)
+	}
+	q.Settings[key] = value
+}
+
+func (q Query) Iter(ctx context.Context, conn *Conn) *Iter {
 	if conn == nil {
 		return &Iter{err: errors.New("Connection pointer is nil")}
 	}
-	resp, err := conn.transport.Exec(conn, q, false)
+	resp, err := conn.transport.Exec(ctx, conn, q, false)
 	if err != nil {
 		return &Iter{err: err}
 	}
@@ -43,11 +55,11 @@ func (q Query) Iter(conn *Conn) *Iter {
 	return &Iter{text: resp}
 }
 
-func (q Query) Exec(conn *Conn) (err error) {
+func (q Query) Exec(ctx context.Context, conn *Conn) (err error) {
 	if conn == nil {
 		return errors.New("Connection pointer is nil")
 	}
-	resp, err := conn.transport.Exec(conn, q, false)
+	resp, err := conn.transport.Exec(ctx, conn, q, false)
 	if err == nil {
 		err = errorFromResponse(resp)
 	}

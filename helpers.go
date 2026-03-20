@@ -14,8 +14,8 @@ type (
 	Array   []interface{}
 )
 
-func NewHttpTransport() HttpTransport {
-	return HttpTransport{}
+func NewHttpTransport() *HttpTransport {
+	return &HttpTransport{}
 }
 
 func NewConn(host string, t Transport) *Conn {
@@ -23,7 +23,7 @@ func NewConn(host string, t Transport) *Conn {
 }
 
 func NewConnWithAuth(host string, t Transport, user string, password string) *Conn {
-	if strings.Index(host, "http://") < 0 && strings.Index(host, "https://") < 0 {
+	if !strings.HasPrefix(host, "http://") && !strings.HasPrefix(host, "https://") {
 		host = "http://" + host
 	}
 	host = strings.TrimRight(host, "/") + "/"
@@ -33,6 +33,29 @@ func NewConnWithAuth(host string, t Transport, user string, password string) *Co
 		transport: t,
 		User:      user,
 		Password:  password,
+	}
+}
+
+type ConnOptions struct {
+	Host     string
+	User     string
+	Password string
+	Database string
+}
+
+func NewConnWithOptions(opts ConnOptions, t Transport) *Conn {
+	host := opts.Host
+	if !strings.HasPrefix(host, "http://") && !strings.HasPrefix(host, "https://") {
+		host = "http://" + host
+	}
+	host = strings.TrimRight(host, "/") + "/"
+
+	return &Conn{
+		Host:      host,
+		transport: t,
+		User:      opts.User,
+		Password:  opts.Password,
+		Database:  opts.Database,
 	}
 }
 

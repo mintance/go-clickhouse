@@ -1,6 +1,7 @@
 package clickhouse
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -10,15 +11,17 @@ const (
 )
 
 type Conn struct {
-	Host      string
+	Host     string
+	User     string
+	Password string
+	Database string
+
 	transport Transport
-	User      string
-	Password  string
 }
 
-func (c *Conn) Ping() (err error) {
+func (c *Conn) Ping(ctx context.Context) (err error) {
 	var res string
-	res, err = c.transport.Exec(c, Query{Stmt: ""}, true)
+	res, err = c.transport.Exec(ctx, c, Query{Stmt: ""}, true)
 	if err == nil {
 		if !strings.Contains(res, successTestResponse) {
 			err = fmt.Errorf("Clickhouse host response was '%s', expected '%s'.", res, successTestResponse)
