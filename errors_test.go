@@ -1,25 +1,22 @@
 package clickhouse
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestErrorFromResponse(t *testing.T) {
-	var err *DbError
-
 	assert.NoError(t, errorFromResponse(""))
 	assert.NoError(t, errorFromResponse("Ok."))
 
-	err = errorFromResponse("Code: 140, 000000").(*DbError)
-
+	err := errorFromResponse("Code: 140, 000000").(*DBError)
 	assert.Error(t, err)
 	assert.Equal(t, 140, err.Code())
-	assert.Equal(t, "", err.Message())
+	assert.Empty(t, err.Message())
 
 	err = errorFromResponse("Code: 62, e.displayText() = DB::Exception: Syntax error: failed at end of query.\n" +
-		"Expected identifier, e.what() = DB::Exception").(*DbError)
-
+		"Expected identifier, e.what() = DB::Exception").(*DBError)
 	assert.Error(t, err)
 	assert.Equal(t, 62, err.Code())
 	assert.Equal(t, "clickhouse error: [62] DB::Exception: Syntax error: failed at end of query.\nExpected identifier",
@@ -29,10 +26,25 @@ func TestErrorFromResponse(t *testing.T) {
 	assert.Equal(t, "DB::Exception: Syntax error: failed at end of query.\nExpected identifier", err.Message())
 
 	resp := "Code: 3, e.displayText() = DB::Exception: Syntax error: failed at end of query.\nExpected identifier,"
-	err = errorFromResponse(resp).(*DbError)
-
+	err = errorFromResponse(resp).(*DBError)
 	assert.Error(t, err)
 	assert.Equal(t, 3, err.Code())
 	assert.Equal(t, resp, err.Response())
 	assert.Equal(t, "DB::Exception: Syntax error: failed at end of query.\nExpected identifier,", err.Message())
+}
+
+func TestErrorFromResponse_CodeWithDot(t *testing.T) {
+	err := errorFromResponse("Code: 81. DB::Exception: Database test doesn't exist").(*DBError)
+	assert.Equal(t, 81, err.Code())
+}
+
+func TestErrorFromResponse_NoMatch(t *testing.T) {
+	assert.NoError(t, errorFromResponse("Some random response"))
+	assert.NoError(t, errorFromResponse("200 OK"))
+}
+
+func TestDBError_Implements(t *testing.T) {
+	var e error = &DBError{code: 1, msg: "test"}
+	assert.Error(t, e)
+	assert.Contains(t, e.Error(), "clickhouse error")
 }

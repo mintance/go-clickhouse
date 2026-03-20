@@ -1,29 +1,31 @@
 package clickhouse
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
 
-const (
-	successTestResponse = "Ok."
-)
+const successTestResponse = "Ok."
 
+// Conn represents a connection to a ClickHouse server.
 type Conn struct {
-	Host      string
+	Host     string
+	User     string
+	Password string
+	Database string
+
 	transport Transport
-	User      string
-	Password  string
 }
 
-func (c *Conn) Ping() (err error) {
-	var res string
-	res, err = c.transport.Exec(c, Query{Stmt: ""}, true)
-	if err == nil {
-		if !strings.Contains(res, successTestResponse) {
-			err = fmt.Errorf("Clickhouse host response was '%s', expected '%s'.", res, successTestResponse)
-		}
+// Ping checks if the ClickHouse server is reachable.
+func (c *Conn) Ping(ctx context.Context) error {
+	res, err := c.transport.Exec(ctx, c, Query{Stmt: ""}, true)
+	if err != nil {
+		return err
 	}
-
-	return err
+	if !strings.Contains(res, successTestResponse) {
+		return fmt.Errorf("clickhouse: unexpected ping response %q, want %q", res, successTestResponse)
+	}
+	return nil
 }
