@@ -7,7 +7,8 @@ on:
     branches: [master]
 
 jobs:
-  test:
+  unit:
+    name: Unit Tests
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -24,7 +25,7 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - name: Run tests
+      - name: Run unit tests
         run: go test -v -race -coverprofile=coverage.out ./...
 
       - name: Upload coverage
@@ -33,3 +34,51 @@ jobs:
         with:
           name: coverage
           path: coverage.out
+
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:latest
+        env:
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+          CLICKHOUSE_PASSWORD: ""
+        ports:
+          - 8123:8123
+          - 9000:9000
+        options: >-
+          --health-cmd "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Wait for ClickHouse
+        run: |
+          for i in $(seq 1 30); do
+            if curl -s http://localhost:8123/ping | grep -q "Ok."; then
+              echo "ClickHouse is ready"
+              exit 0
+            fi
+            echo "Waiting for ClickHouse... ($i)"
+            sleep 1
+          done
+          echo "ClickHouse failed to start"
+          exit 1
+
+      - name: Run integration tests
+        env:
+          CLICKHOUSE_HOST: localhost:8123
+        run: go test -v -race -tags=integration -run=TestIntegration ./...
