@@ -1,23 +1,40 @@
-# go-clickhouse 
-# [![Travis status](https://img.shields.io/travis/roistat/go-clickhouse.svg)](https://travis-ci.org/roistat/go-clickhouse) [![Coverage Status](https://img.shields.io/coveralls/roistat/go-clickhouse.svg)](https://coveralls.io/github/roistat/go-clickhouse) [![Go Report](https://goreportcard.com/badge/github.com/roistat/go-clickhouse)](https://goreportcard.com/report/github.com/roistat/go-clickhouse) ![](https://img.shields.io/github/license/roistat/go-clickhouse.svg)
+# go-clickhouse
 
-Golang [Yandex ClickHouse](https://clickhouse.yandex/) connector
+[![Tests](https://github.com/mintance/go-clickhouse/actions/workflows/test.yml/badge.svg)](https://github.com/mintance/go-clickhouse/actions/workflows/test.yml) [![Go Report](https://goreportcard.com/badge/github.com/mintance/go-clickhouse)](https://goreportcard.com/report/github.com/mintance/go-clickhouse) ![](https://img.shields.io/github/license/mintance/go-clickhouse.svg)
 
-ClickHouse manages extremely large volumes of data in a stable and sustainable manner.
-It currently powers Yandex.Metrica, world’s second largest web analytics platform,
-with over 13 trillion database records and over 20 billion events a day, generating
-customized reports on-the-fly, directly from non-aggregated data. This system was
-successfully implemented at CERN’s LHCb experiment to store and process metadata on
-10bn events with over 1000 attributes per event registered in 2011.
+Lightweight Go client for [ClickHouse](https://clickhouse.com/) using the HTTP interface.
+
+## Features
+
+- HTTP interface (GET for read-only, POST for mutations)
+- `context.Context` support for timeouts and cancellation
+- Connection pooling (reused `http.Client`)
+- Gzip compression
+- Authentication (`X-ClickHouse-User` / `X-ClickHouse-Key`)
+- Database selection
+- Query ID and Session ID support
+- Per-query settings
+- External data for query processing
+- Cluster mode with health checks
+- Type support: int, uint, float, string, bool, time.Time, arrays, Nullable
+
+## Install
+
+```
+go get github.com/mintance/go-clickhouse
+```
+
+Requires Go 1.21+.
 
 ## Examples
 
-#### Query rows
+### Query rows
 
 ```go
+ctx := context.Background()
 conn := clickhouse.NewConn("localhost:8123", clickhouse.NewHttpTransport())
 query := clickhouse.NewQuery("SELECT name, date FROM clicks")
-iter := query.Iter(conn)
+iter := query.Iter(ctx, conn)
 var (
     name string
     date string
@@ -30,32 +47,78 @@ if iter.Error() != nil {
 }
 ```
 
-#### Single insert
+### Insert
+
 ```go
+ctx := context.Background()
 conn := clickhouse.NewConn("localhost:8123", clickhouse.NewHttpTransport())
 query, err := clickhouse.BuildInsert("clicks",
     clickhouse.Columns{"name", "date", "sourceip"},
     clickhouse.Row{"Test name", "2016-01-01 21:01:01", clickhouse.Func{"IPv4StringToNum", "192.0.2.192"}},
 )
 if err == nil {
-    err = query.Exec(conn)
-    if err == nil {
-        //
-    }
+    err = query.Exec(ctx, conn)
 }
 ```
 
-#### External data for query processing
-
-[See documentation for details](https://clickhouse.yandex/reference_en.html#External%20data%20for%20query%20processing) 
+### Multi insert
 
 ```go
-conn := clickhouse.NewConn("localhost:8123", clickhouse.NewHttpTransport())
+query, err := clickhouse.BuildMultiInsert("clicks",
+    clickhouse.Columns{"name", "count"},
+    clickhouse.Rows{
+        clickhouse.Row{"first", 1},
+        clickhouse.Row{"second", 2},
+    },
+)
+if err == nil {
+    err = query.Exec(ctx, conn)
+}
+```
+
+### Authentication and database
+
+```go
+transport := clickhouse.NewHttpTransport()
+conn := clickhouse.NewConnWithAuth("localhost:8123", transport, "user", "password")
+```
+
+Or with all options:
+
+```go
+conn := clickhouse.NewConnWithOptions(clickhouse.ConnOptions{
+    Host:     "localhost:8123",
+    User:     "user",
+    Password: "password",
+    Database: "mydb",
+}, transport)
+```
+
+### Query ID and Session ID
+
+```go
+query := clickhouse.NewQuery("SELECT 1")
+query.QueryID = "my-query-123"   // track in system.query_log
+query.SessionID = "my-session"   // persist SET commands across queries
+```
+
+### Per-query settings
+
+```go
+query := clickhouse.NewQuery("SELECT number FROM system.numbers LIMIT 100")
+query.SetSetting("max_rows_to_read", "1000000")
+query.SetSetting("max_execution_time", "60")
+```
+
+### External data
+
+[See ClickHouse documentation](https://clickhouse.com/docs/en/engines/table-engines/special/external-data)
+
+```go
 query := clickhouse.NewQuery("SELECT Num, Name FROM extdata")
-query.AddExternal("extdata", "Num UInt32, Name String", []byte("1	first\n2	second")) // tab separated
+query.AddExternal("extdata", "Num UInt32, Name String", []byte("1\tfirst\n2\tsecond"))
 
-
-iter := query.Iter(conn)
+iter := query.Iter(ctx, conn)
 var (
     num  int
     name string
@@ -63,31 +126,46 @@ var (
 for iter.Scan(&num, &name) {
     //
 }
-if iter.Error() != nil {
-    log.Panicln(iter.Error())
+```
+
+### Compression
+
+```go
+transport := &clickhouse.HttpTransport{
+    Timeout:     5 * time.Second,
+    Compression: true,
 }
+conn := clickhouse.NewConn("localhost:8123", transport)
+```
+
+### Context with timeout
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+defer cancel()
+
+iter := query.Iter(ctx, conn)
 ```
 
 ## Cluster
 
-Cluster is useful if you have several servers with same `Distributed` table (master). In this case you can send
-requests to random master to balance load.
+Cluster is useful if you have several servers with the same `Distributed` table. Requests are sent to a random active connection to balance load.
 
-* `cluster.Check()` pings all connections and filters active ones
-* `cluster.ActiveConn()` returns random active connection
-* `cluster.OnCheckError()` is called when any connection fails
+- `cluster.Check()` pings all connections and filters active ones
+- `cluster.CheckCtx(ctx)` same with context support
+- `cluster.ActiveConn()` returns a random active connection
+- `cluster.OnCheckError()` is called when any connection fails
 
-**Important**: You should call method `Check()` at least once after initialization, but we recommend
-to call it continuously, so `ActiveConn()` will always return filtered active connection.
+**Important**: Call `Check()` at least once after initialization. We recommend calling it continuously so `ActiveConn()` always returns an active connection.
 
 ```go
-http := clickhouse.NewHttpTransport()
-conn1 := clickhouse.NewConn("host1", http)
-conn2 := clickhouse.NewConn("host2", http)
+transport := clickhouse.NewHttpTransport()
+conn1 := clickhouse.NewConn("host1", transport)
+conn2 := clickhouse.NewConn("host2", transport)
 
 cluster := clickhouse.NewCluster(conn1, conn2)
-cluster.OnCheckError(func (c *clickhouse.Conn) {
-    log.Fatalf("Clickhouse connection failed %s", c.Host)
+cluster.OnCheckError(func(c *clickhouse.Conn) {
+    log.Printf("ClickHouse connection failed %s", c.Host)
 })
 // Ping connections every second
 go func() {
@@ -103,8 +181,8 @@ go func() {
 ### Timeout
 
 ```go
-t := clickhouse.NewHttpTransport()
-t.Timeout = time.Second * 5
+transport := clickhouse.NewHttpTransport()
+transport.Timeout = 5 * time.Second
 
-conn := clickhouse.NewConn("host", t)
+conn := clickhouse.NewConn("localhost:8123", transport)
 ```
