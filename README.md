@@ -296,3 +296,7 @@ conn := clickhouse.NewConn("localhost:8123", transport)
 | Nullable(String) | `*string` | — | Yes |
 | Nullable(Int64) | `*int64` | — | Yes |
 | Nullable(Float64) | `*float64` | — | Yes |
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, how to run tests, and PR guidelines.
