@@ -1,74 +1,59 @@
 package clickhouse
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-func TestNewHttpTransport(t *testing.T) {
-	tr := NewHttpTransport()
-	assert.IsType(t, &HttpTransport{}, tr)
+func TestNewHTTPTransport(t *testing.T) {
+	tr := NewHTTPTransport()
+	assert.IsType(t, &HTTPTransport{}, tr)
 }
 
 func TestNewQuery(t *testing.T) {
 	stmt := "SELECT * FROM table WHERE ?"
 	q := NewQuery(stmt, 1)
 	assert.Equal(t, stmt, q.Stmt)
-	assert.Equal(t, []interface{}{1}, q.args)
+	assert.Equal(t, []any{1}, q.args)
 }
 
 func TestBuildInsert(t *testing.T) {
-	var (
-		q   Query
-		err error
-	)
-
-	q, err = BuildInsert("test", Columns{"col1", "col2"}, Row{"val1", "val2"})
+	q, err := BuildInsert("test", Columns{"col1", "col2"}, Row{"val1", "val2"})
 	assert.Equal(t, "INSERT INTO test (col1,col2) VALUES (?,?)", q.Stmt)
-	assert.Equal(t, []interface{}{"val1", "val2"}, q.args)
+	assert.Equal(t, []any{"val1", "val2"}, q.args)
 	assert.NoError(t, err)
 
 	q, err = BuildInsert("test", Columns{"col1", "col2"}, Row{"val1"})
-	assert.Equal(t, "", q.Stmt)
+	assert.Empty(t, q.Stmt)
 	assert.Error(t, err)
 }
 
 func TestBuildInsertArray(t *testing.T) {
-	var (
-		q   Query
-		err error
-	)
-
-	q, err = BuildInsert("test", Columns{"col1", "col2"}, Row{"val1", Array{"val2", "val3"}})
+	q, err := BuildInsert("test", Columns{"col1", "col2"}, Row{"val1", Array{"val2", "val3"}})
 	assert.Equal(t, "INSERT INTO test (col1,col2) VALUES (?,?)", q.Stmt)
-	assert.Equal(t, []interface{}{"val1", Array{"val2", "val3"}}, q.args)
+	assert.Equal(t, []any{"val1", Array{"val2", "val3"}}, q.args)
 	assert.NoError(t, err)
 }
 
-func TestNewMultiInsert(t *testing.T) {
-	var (
-		q   Query
-		err error
-	)
-
-	q, err = BuildMultiInsert("test", Columns{"col1", "col2"}, Rows{
+func TestBuildMultiInsert(t *testing.T) {
+	q, err := BuildMultiInsert("test", Columns{"col1", "col2"}, Rows{
 		Row{"val1", "val2"},
 		Row{"val3", "val4"},
 	})
 	assert.Equal(t, "INSERT INTO test (col1,col2) VALUES (?,?),(?,?)", q.Stmt)
-	assert.Equal(t, []interface{}{"val1", "val2", "val3", "val4"}, q.args)
+	assert.Equal(t, []any{"val1", "val2", "val3", "val4"}, q.args)
 	assert.NoError(t, err)
 
 	q, err = BuildMultiInsert("test", Columns{"col1", "col2"}, Rows{
 		Row{"val1", "val2"},
 		Row{"val3"},
 	})
-	assert.Equal(t, "", q.Stmt)
+	assert.Empty(t, q.Stmt)
 	assert.Error(t, err)
 
-	//Test empty insert
 	q, err = BuildMultiInsert("test", Columns{}, Rows{})
-	assert.Equal(t, "", q.Stmt)
+	assert.Empty(t, q.Stmt)
 	assert.Error(t, err)
 }
 
@@ -80,7 +65,7 @@ func BenchmarkNewInsert(b *testing.B) {
 
 func getRows(n int, r Row) Rows {
 	res := make(Rows, n)
-	for i := 0; i < n; i++ {
+	for i := range res {
 		res[i] = r
 	}
 	return res

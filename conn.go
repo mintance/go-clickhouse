@@ -6,10 +6,9 @@ import (
 	"strings"
 )
 
-const (
-	successTestResponse = "Ok."
-)
+const successTestResponse = "Ok."
 
+// Conn represents a connection to a ClickHouse server.
 type Conn struct {
 	Host     string
 	User     string
@@ -19,14 +18,14 @@ type Conn struct {
 	transport Transport
 }
 
-func (c *Conn) Ping(ctx context.Context) (err error) {
-	var res string
-	res, err = c.transport.Exec(ctx, c, Query{Stmt: ""}, true)
-	if err == nil {
-		if !strings.Contains(res, successTestResponse) {
-			err = fmt.Errorf("Clickhouse host response was '%s', expected '%s'.", res, successTestResponse)
-		}
+// Ping checks if the ClickHouse server is reachable.
+func (c *Conn) Ping(ctx context.Context) error {
+	res, err := c.transport.Exec(ctx, c, Query{Stmt: ""}, true)
+	if err != nil {
+		return err
 	}
-
-	return err
+	if !strings.Contains(res, successTestResponse) {
+		return fmt.Errorf("clickhouse: unexpected ping response %q, want %q", res, successTestResponse)
+	}
+	return nil
 }

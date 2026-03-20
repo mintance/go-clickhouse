@@ -6,36 +6,16 @@ import (
 	"strings"
 )
 
+// Type aliases for query building.
 type (
 	Column  string
 	Columns []string
-	Row     []interface{}
+	Row     []any
 	Rows    []Row
-	Array   []interface{}
+	Array   []any
 )
 
-func NewHttpTransport() *HttpTransport {
-	return &HttpTransport{}
-}
-
-func NewConn(host string, t Transport) *Conn {
-	return NewConnWithAuth(host, t, "", "")
-}
-
-func NewConnWithAuth(host string, t Transport, user string, password string) *Conn {
-	if !strings.HasPrefix(host, "http://") && !strings.HasPrefix(host, "https://") {
-		host = "http://" + host
-	}
-	host = strings.TrimRight(host, "/") + "/"
-
-	return &Conn{
-		Host:      host,
-		transport: t,
-		User:      user,
-		Password:  password,
-	}
-}
-
+// ConnOptions holds all parameters for creating a new connection.
 type ConnOptions struct {
 	Host     string
 	User     string
@@ -43,13 +23,28 @@ type ConnOptions struct {
 	Database string
 }
 
-func NewConnWithOptions(opts ConnOptions, t Transport) *Conn {
-	host := opts.Host
-	if !strings.HasPrefix(host, "http://") && !strings.HasPrefix(host, "https://") {
-		host = "http://" + host
-	}
-	host = strings.TrimRight(host, "/") + "/"
+// NewHTTPTransport creates a new HTTP transport with default settings.
+func NewHTTPTransport() *HTTPTransport {
+	return &HTTPTransport{}
+}
 
+// NewConn creates a new connection to the given host.
+func NewConn(host string, t Transport) *Conn {
+	return NewConnWithAuth(host, t, "", "")
+}
+
+// NewConnWithAuth creates a new connection with user/password authentication.
+func NewConnWithAuth(host string, t Transport, user, password string) *Conn {
+	return NewConnWithOptions(ConnOptions{
+		Host:     host,
+		User:     user,
+		Password: password,
+	}, t)
+}
+
+// NewConnWithOptions creates a new connection from the given options.
+func NewConnWithOptions(opts ConnOptions, t Transport) *Conn {
+	host := normalizeHost(opts.Host)
 	return &Conn{
 		Host:      host,
 		transport: t,
@@ -59,48 +54,49 @@ func NewConnWithOptions(opts ConnOptions, t Transport) *Conn {
 	}
 }
 
-func NewQuery(stmt string, args ...interface{}) Query {
+func normalizeHost(host string) string {
+	if !strings.HasPrefix(host, "http://") && !strings.HasPrefix(host, "https://") {
+		host = "http://" + host
+	}
+	return strings.TrimRight(host, "/") + "/"
+}
+
+// NewQuery creates a new query with placeholder arguments.
+// Use ? as placeholders: NewQuery("SELECT * FROM t WHERE id = ?", 42).
+func NewQuery(stmt string, args ...any) Query {
 	return Query{
 		Stmt: stmt,
 		args: args,
 	}
 }
 
+// BuildInsert creates an INSERT query for a single row.
 func BuildInsert(tbl string, cols Columns, row Row) (Query, error) {
 	return BuildMultiInsert(tbl, cols, Rows{row})
 }
 
+// BuildMultiInsert creates an INSERT query for multiple rows.
 func BuildMultiInsert(tbl string, cols Columns, rows Rows) (Query, error) {
-	var (
-		stmt string
-		args []interface{}
-	)
-
 	if len(cols) == 0 || len(rows) == 0 {
 		return Query{}, errors.New("rows and cols cannot be empty")
 	}
 
 	colCount := len(cols)
 	rowCount := len(rows)
-	args = make([]interface{}, colCount*rowCount)
-	argi := 0
+	args := make([]any, 0, colCount*rowCount)
 
 	for _, row := range rows {
 		if len(row) != colCount {
-			return Query{}, errors.New("Amount of row items does not match column count")
+			return Query{}, errors.New("row item count does not match column count")
 		}
-		for _, val := range row {
-			args[argi] = val
-			argi++
-		}
+		args = append(args, row...)
 	}
 
-	binds := strings.Repeat("?,", colCount)
-	binds = "(" + binds[:len(binds)-1] + "),"
+	binds := "(" + strings.Repeat("?,", colCount)
+	binds = binds[:len(binds)-1] + "),"
 	batch := strings.Repeat(binds, rowCount)
 	batch = batch[:len(batch)-1]
 
-	stmt = fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", tbl, strings.Join(cols, ","), batch)
-
+	stmt := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", tbl, strings.Join(cols, ","), batch)
 	return NewQuery(stmt, args...), nil
 }

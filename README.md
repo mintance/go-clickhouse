@@ -32,7 +32,7 @@ Requires Go 1.21+.
 
 ```go
 ctx := context.Background()
-conn := clickhouse.NewConn("localhost:8123", clickhouse.NewHttpTransport())
+conn := clickhouse.NewConn("localhost:8123", clickhouse.NewHTTPTransport())
 query := clickhouse.NewQuery("SELECT name, date FROM clicks")
 iter := query.Iter(ctx, conn)
 var (
@@ -51,7 +51,7 @@ if iter.Error() != nil {
 
 ```go
 ctx := context.Background()
-conn := clickhouse.NewConn("localhost:8123", clickhouse.NewHttpTransport())
+conn := clickhouse.NewConn("localhost:8123", clickhouse.NewHTTPTransport())
 query, err := clickhouse.BuildInsert("clicks",
     clickhouse.Columns{"name", "date", "sourceip"},
     clickhouse.Row{"Test name", "2016-01-01 21:01:01", clickhouse.Func{"IPv4StringToNum", "192.0.2.192"}},
@@ -79,7 +79,7 @@ if err == nil {
 ### Authentication and database
 
 ```go
-transport := clickhouse.NewHttpTransport()
+transport := clickhouse.NewHTTPTransport()
 conn := clickhouse.NewConnWithAuth("localhost:8123", transport, "user", "password")
 ```
 
@@ -131,7 +131,7 @@ for iter.Scan(&num, &name) {
 ### Compression
 
 ```go
-transport := &clickhouse.HttpTransport{
+transport := &clickhouse.HTTPTransport{
     Timeout:     5 * time.Second,
     Compression: true,
 }
@@ -159,7 +159,7 @@ Cluster is useful if you have several servers with the same `Distributed` table.
 **Important**: Call `Check()` at least once after initialization. We recommend calling it continuously so `ActiveConn()` always returns an active connection.
 
 ```go
-transport := clickhouse.NewHttpTransport()
+transport := clickhouse.NewHTTPTransport()
 conn1 := clickhouse.NewConn("host1", transport)
 conn2 := clickhouse.NewConn("host2", transport)
 
@@ -181,7 +181,7 @@ go func() {
 ### Timeout
 
 ```go
-transport := clickhouse.NewHttpTransport()
+transport := clickhouse.NewHTTPTransport()
 transport.Timeout = 5 * time.Second
 
 conn := clickhouse.NewConn("localhost:8123", transport)

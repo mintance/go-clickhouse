@@ -14,15 +14,16 @@ import (
 	"time"
 )
 
-const (
-	httpTransportBodyType = "text/plain"
-)
+const httpTransportBodyType = "text/plain"
 
+// Transport is the interface for executing ClickHouse queries over a network protocol.
 type Transport interface {
-	Exec(ctx context.Context, conn *Conn, q Query, readOnly bool) (res string, err error)
+	Exec(ctx context.Context, conn *Conn, q Query, readOnly bool) (string, error)
 }
 
-type HttpTransport struct {
+// HTTPTransport executes queries over the ClickHouse HTTP interface.
+// A single HTTPTransport reuses connections across requests.
+type HTTPTransport struct {
 	Timeout     time.Duration
 	Compression bool
 
@@ -30,7 +31,10 @@ type HttpTransport struct {
 	client *http.Client
 }
 
-func (t *HttpTransport) getClient() *http.Client {
+// Compile-time check that HTTPTransport implements Transport.
+var _ Transport = (*HTTPTransport)(nil)
+
+func (t *HTTPTransport) getClient() *http.Client {
 	t.once.Do(func() {
 		t.client = &http.Client{
 			Timeout: t.Timeout,
@@ -44,59 +48,35 @@ func (t *HttpTransport) getClient() *http.Client {
 	return t.client
 }
 
-func (t *HttpTransport) Exec(ctx context.Context, conn *Conn, q Query, readOnly bool) (res string, err error) {
+// Exec sends a query to ClickHouse and returns the response body.
+// When readOnly is true, the query is sent as a GET request.
+func (t *HTTPTransport) Exec(ctx context.Context, conn *Conn, q Query, readOnly bool) (string, error) {
 	var req *http.Request
-	query := prepareHttp(q.Stmt, q.args)
-	client := t.getClient()
+	var err error
+
+	query := prepareHTTP(q.Stmt, q.args)
 
 	if readOnly {
-		params := url.Values{}
-		if len(query) > 0 {
-			params.Set("query", query)
-		}
-		t.addConnParams(conn, params)
-		t.addQueryParams(q, params)
-
-		reqURL := conn.Host
-		if encoded := params.Encode(); len(encoded) > 0 {
-			reqURL += "?" + encoded
-		}
-		req, err = http.NewRequestWithContext(ctx, "GET", reqURL, nil)
-		if err != nil {
-			return "", err
-		}
+		req, err = t.buildGetRequest(ctx, conn, q, query)
 	} else {
-		req, err = prepareExecPostRequest(ctx, conn, q)
-		if err != nil {
-			return "", err
-		}
+		req, err = buildPostRequest(ctx, conn, q)
+	}
+	if err != nil {
+		return "", err
 	}
 
 	t.setHeaders(conn, req)
 
-	resp, err := client.Do(req)
+	resp, err := t.getClient().Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 
-	var reader io.Reader = resp.Body
-	if resp.Header.Get("Content-Encoding") == "gzip" {
-		gz, gzErr := gzip.NewReader(resp.Body)
-		if gzErr != nil {
-			return "", gzErr
-		}
-		defer gz.Close()
-		reader = gz
-	}
-
-	buf := new(bytes.Buffer)
-	_, err = buf.ReadFrom(reader)
+	body, err := t.readBody(resp)
 	if err != nil {
 		return "", err
 	}
-
-	body := buf.String()
 
 	if resp.StatusCode != http.StatusOK {
 		if dbErr := errorFromResponse(body); dbErr != nil {
@@ -108,14 +88,47 @@ func (t *HttpTransport) Exec(ctx context.Context, conn *Conn, q Query, readOnly 
 	return body, nil
 }
 
-func (t *HttpTransport) setHeaders(conn *Conn, req *http.Request) {
-	if len(conn.User) > 0 {
+func (t *HTTPTransport) buildGetRequest(ctx context.Context, conn *Conn, q Query, query string) (*http.Request, error) {
+	params := url.Values{}
+	if len(query) > 0 {
+		params.Set("query", query)
+	}
+	addConnParams(conn, params)
+	addQueryParams(q, params)
+
+	reqURL := conn.Host
+	if encoded := params.Encode(); len(encoded) > 0 {
+		reqURL += "?" + encoded
+	}
+	return http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+}
+
+func (t *HTTPTransport) readBody(resp *http.Response) (string, error) {
+	var reader io.Reader = resp.Body
+	if resp.Header.Get("Content-Encoding") == "gzip" {
+		gz, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			return "", err
+		}
+		defer gz.Close()
+		reader = gz
+	}
+
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(reader); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+func (t *HTTPTransport) setHeaders(conn *Conn, req *http.Request) {
+	if conn.User != "" {
 		req.Header.Set("X-ClickHouse-User", conn.User)
 	}
-	if len(conn.Password) > 0 {
+	if conn.Password != "" {
 		req.Header.Set("X-ClickHouse-Key", conn.Password)
 	}
-	if len(conn.Database) > 0 {
+	if conn.Database != "" {
 		req.Header.Set("X-ClickHouse-Database", conn.Database)
 	}
 	if t.Compression {
@@ -123,17 +136,17 @@ func (t *HttpTransport) setHeaders(conn *Conn, req *http.Request) {
 	}
 }
 
-func (t *HttpTransport) addConnParams(conn *Conn, params url.Values) {
-	if len(conn.Database) > 0 {
+func addConnParams(conn *Conn, params url.Values) {
+	if conn.Database != "" {
 		params.Set("database", conn.Database)
 	}
 }
 
-func (t *HttpTransport) addQueryParams(q Query, params url.Values) {
-	if len(q.QueryID) > 0 {
+func addQueryParams(q Query, params url.Values) {
+	if q.QueryID != "" {
 		params.Set("query_id", q.QueryID)
 	}
-	if len(q.SessionID) > 0 {
+	if q.SessionID != "" {
 		params.Set("session_id", q.SessionID)
 	}
 	for k, v := range q.Settings {
@@ -141,91 +154,77 @@ func (t *HttpTransport) addQueryParams(q Query, params url.Values) {
 	}
 }
 
-func prepareExecPostRequest(ctx context.Context, conn *Conn, q Query) (*http.Request, error) {
-	query := prepareHttp(q.Stmt, q.args)
-	var req *http.Request
-	var err error
+func buildPostRequest(ctx context.Context, conn *Conn, q Query) (*http.Request, error) {
+	query := prepareHTTP(q.Stmt, q.args)
 
 	if len(q.externals) > 0 {
-		params := url.Values{}
-		if len(query) > 0 {
-			params.Set("query", query)
-		}
-		for _, ext := range q.externals {
-			params.Set(ext.Name+"_structure", ext.Structure)
-		}
-		if len(q.QueryID) > 0 {
-			params.Set("query_id", q.QueryID)
-		}
-		if len(q.SessionID) > 0 {
-			params.Set("session_id", q.SessionID)
-		}
-		if len(conn.Database) > 0 {
-			params.Set("database", conn.Database)
-		}
-		for k, v := range q.Settings {
-			params.Set(k, v)
-		}
-
-		body := &bytes.Buffer{}
-		writer := multipart.NewWriter(body)
-
-		for _, ext := range q.externals {
-			part, partErr := writer.CreateFormFile(ext.Name, ext.Name)
-			if partErr != nil {
-				return nil, partErr
-			}
-			_, partErr = part.Write(ext.Data)
-			if partErr != nil {
-				return nil, partErr
-			}
-		}
-
-		err = writer.Close()
-		if err != nil {
-			return nil, err
-		}
-
-		reqURL := conn.Host + "?" + params.Encode()
-		req, err = http.NewRequestWithContext(ctx, "POST", reqURL, body)
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Content-Type", writer.FormDataContentType())
-	} else {
-		postURL := conn.Host
-		params := url.Values{}
-		if len(q.QueryID) > 0 {
-			params.Set("query_id", q.QueryID)
-		}
-		if len(q.SessionID) > 0 {
-			params.Set("session_id", q.SessionID)
-		}
-		if len(conn.Database) > 0 {
-			params.Set("database", conn.Database)
-		}
-		for k, v := range q.Settings {
-			params.Set(k, v)
-		}
-		if encoded := params.Encode(); len(encoded) > 0 {
-			postURL += "?" + encoded
-		}
-
-		req, err = http.NewRequestWithContext(ctx, "POST", postURL, strings.NewReader(query))
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Content-Type", httpTransportBodyType)
+		return buildMultipartPostRequest(ctx, conn, q, query)
 	}
-	return req, err
+	return buildSimplePostRequest(ctx, conn, q, query)
 }
 
-func prepareHttp(stmt string, args []interface{}) string {
+func buildMultipartPostRequest(ctx context.Context, conn *Conn, q Query, query string) (*http.Request, error) {
+	params := url.Values{}
+	if len(query) > 0 {
+		params.Set("query", query)
+	}
+	for _, ext := range q.externals {
+		params.Set(ext.Name+"_structure", ext.Structure)
+	}
+	addConnParams(conn, params)
+	addQueryParams(q, params)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	for _, ext := range q.externals {
+		part, err := writer.CreateFormFile(ext.Name, ext.Name)
+		if err != nil {
+			return nil, err
+		}
+		if _, err = part.Write(ext.Data); err != nil {
+			return nil, err
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+
+	reqURL := conn.Host + "?" + params.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, &body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	return req, nil
+}
+
+func buildSimplePostRequest(ctx context.Context, conn *Conn, q Query, query string) (*http.Request, error) {
+	params := url.Values{}
+	addConnParams(conn, params)
+	addQueryParams(q, params)
+
+	postURL := conn.Host
+	if encoded := params.Encode(); len(encoded) > 0 {
+		postURL += "?" + encoded
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, postURL, strings.NewReader(query))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", httpTransportBodyType)
+	return req, nil
+}
+
+func prepareHTTP(stmt string, args []any) string {
+	if len(args) == 0 {
+		return stmt
+	}
+
 	var res []byte
-	buf := []byte(stmt)
-	res = make([]byte, 0)
 	k := 0
-	for _, ch := range buf {
+	for _, ch := range []byte(stmt) {
 		if ch == '?' {
 			res = append(res, []byte(marshal(args[k]))...)
 			k++
@@ -233,6 +232,5 @@ func prepareHttp(stmt string, args []interface{}) string {
 			res = append(res, ch)
 		}
 	}
-
 	return string(res)
 }

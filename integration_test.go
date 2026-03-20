@@ -19,7 +19,7 @@ func getIntegrationConn(t *testing.T) *Conn {
 	if host == "" {
 		host = "localhost:8123"
 	}
-	transport := &HttpTransport{Timeout: 10 * time.Second}
+	transport := &HTTPTransport{Timeout: 10 * time.Second}
 	conn := NewConn(host, transport)
 	return conn
 }
@@ -30,7 +30,7 @@ func getIntegrationConnWithDB(t *testing.T, db string) *Conn {
 	if host == "" {
 		host = "localhost:8123"
 	}
-	transport := &HttpTransport{Timeout: 10 * time.Second}
+	transport := &HTTPTransport{Timeout: 10 * time.Second}
 	conn := NewConnWithOptions(ConnOptions{
 		Host:     host,
 		Database: db,
@@ -295,7 +295,7 @@ func TestIntegration_ExecError(t *testing.T) {
 	err := q.Exec(ctx, conn)
 	assert.Error(t, err)
 
-	dbErr, ok := err.(*DbError)
+	dbErr, ok := err.(*DBError)
 	assert.True(t, ok)
 	assert.Greater(t, dbErr.Code(), 0)
 }
@@ -421,7 +421,7 @@ func TestIntegration_Compression(t *testing.T) {
 	if host == "" {
 		host = "localhost:8123"
 	}
-	transport := &HttpTransport{
+	transport := &HTTPTransport{
 		Timeout:     10 * time.Second,
 		Compression: true,
 	}
@@ -492,7 +492,7 @@ func TestIntegration_Cluster(t *testing.T) {
 	if host == "" {
 		host = "localhost:8123"
 	}
-	transport := &HttpTransport{Timeout: 5 * time.Second}
+	transport := &HTTPTransport{Timeout: 5 * time.Second}
 
 	conn1 := NewConn(host, transport)
 	conn2 := NewConn("localhost:19999", transport) // bad port
